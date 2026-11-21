@@ -1,0 +1,60 @@
+# ==============================================================================
+# AI 태블릿 스터디 노트 (iPadOS App Store & Android Google Play)
+# Fastlane 무중단 자동 빌드·테스트·스토어 배포 스크립트 (Fastfile)
+# ==============================================================================
+# 사용 방법:
+# 1. iPadOS TestFlight 배포: fastlane ios beta
+# 2. Android Play Console 내부 테스트 트랙 배포: fastlane android internal
+# ==============================================================================
+
+default_platform(:ios)
+
+desc "Flutter 단위·위젯 테스트(widget_test.dart) 사전 검증"
+lane :verify_flutter_tests do
+  sh("flutter pub get")
+  sh("flutter test test/widget_test.dart")
+end
+
+platform :ios do
+  desc "iPadOS (4:3) 릴리즈 IPA 빌드 및 TestFlight 자동 업로드"
+  lane :beta do
+    verify_flutter_tests
+
+    sh(
+      "flutter build ipa --release " \
+      "--dart-define=SUPABASE_URL=#{ENV['SUPABASE_URL']} " \
+      "--dart-define=SUPABASE_ANON_KEY=#{ENV['SUPABASE_ANON_KEY']}"
+    )
+
+    build_app(
+      workspace: "ios/Runner.xcworkspace",
+      scheme: "Runner",
+      export_method: "app-store"
+    )
+
+    upload_to_testflight(
+      skip_waiting_for_build_processing: true
+    )
+  end
+end
+
+platform :android do
+  desc "안드로이드 태블릿 (16:10) App Bundle(.aab) 빌드 및 Play Store 내부 트랙 배포"
+  lane :internal do
+    verify_flutter_tests
+
+    sh(
+      "flutter build appbundle --release " \
+      "--dart-define=SUPABASE_URL=#{ENV['SUPABASE_URL']} " \
+      "--dart-define=SUPABASE_ANON_KEY=#{ENV['SUPABASE_ANON_KEY']}"
+    )
+
+    upload_to_play_store(
+      track: "internal",
+      aab: "build/app/outputs/bundle/release/app-release.aab",
+      skip_upload_metadata: true,
+      skip_upload_images: true,
+      skip_upload_screenshots: true
+    )
+  end
+end

@@ -1,0 +1,43 @@
+name: study_note_app
+description: >-
+  Cross-platform iPad (4:3) & Android Tablet (16:10) AI Study Note App
+  with PDF handwriting sync, Gemini audio transcription, audiobook playlist,
+  voice cloze quiz, Apple Pencil / S-Pen handwriting grading, and AI study planner.
+publish_to: 'none'
+version: 1.0.0+1
+
+environment:
+  sdk: '>=3.3.0 <4.0.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+  # 1. PDF 뷰어, 텍스트 추출 및 필기+요약 Flatten PDF 합본 생성
+  syncfusion_flutter_pdfviewer: '>=27.1.48 <36.0.0'
+  syncfusion_flutter_pdf: '>=27.1.48 <36.0.0'
+
+  # 2. Gemini 2.5 Flash 멀티모달 API (문서 자동 분류, 올가미 오답 생성, 강의 음성 전사, 손글씨 채점, 일일 플래너)
+  firebase_core: '>=3.0.0 <5.0.0'
+  firebase_ai: '>=2.0.0 <6.0.0'
+
+  # 3. 오프라인 우선 로컬 SQLite + Supabase Realtime CRDT 양방향 동기화
+  supabase_flutter: '>=2.5.0 <3.0.0'
+  sqflite: '>=2.3.0 <3.0.0'
+  path_provider: '>=2.1.0 <3.0.0'
+  path: '>=1.8.0 <2.0.0'
+
+  # 4. 로컬 PDF, 강의 오디오(.m4a/.mp3), 캘린더(.ics), 백업(.studynote.json) 파일 선택·저장
+  file_picker: '>=8.0.0 <11.0.0'
+
+  # 5. 실기기 오디오 녹음 및 오디오북 재생 연동용
+  record: '>=5.0.0 <7.0.0'
+  just_audio: '>=0.9.36 <1.0.0'
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: '>=3.0.0 <6.0.0'
+
+flutter:
+  uses-material-design: true
