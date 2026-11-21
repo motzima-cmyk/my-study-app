@@ -19,35 +19,28 @@ jobs:
       - uses: subosito/flutter-action@v2
         with:
           channel: 'stable'
-      - name: Auto-Detect Project & Build Release APK
+      - name: Auto-Detect Project, Repair Strings & Build Release APK
         shell: bash
         run: |
           set -e
           PUBSPEC_PATH="$(find . -maxdepth 4 -name 'pubspec.yaml' -not -path '*/.*' | head -n 1)"
           if [ -z "$PUBSPEC_PATH" ]; then
             echo "ERROR: pubspec.yaml 파일을 저장소에서 찾을 수 없습니다."
-            ls -la
             exit 1
           fi
           SRC_DIR="$(dirname "$PUBSPEC_PATH")"
-          echo "✅ pubspec.yaml 발견: $PUBSPEC_PATH (기준 폴더: $SRC_DIR)"
+          echo "✅ pubspec.yaml 발견: $PUBSPEC_PATH"
 
           if [ -f "$SRC_DIR/lib/main.dart" ]; then
-            echo "✅ 이미 조립된 Flutter 프로젝트($SRC_DIR)를 그대로 사용합니다."
             cd "$SRC_DIR"
-            if [ ! -d "android" ]; then
-              flutter create --org com.studynote --platforms=android .
-            fi
+            [ ! -d "android" ] && flutter create --org com.studynote --platforms=android .
           else
-            echo "🛠️ 낱개 소스 파일 폴더($SRC_DIR)에서 임시 앱 폴더를 조립합니다."
             BUILD_DIR="$GITHUB_WORKSPACE/__build_android_app"
             rm -rf "$BUILD_DIR"
             flutter create --org com.studynote --platforms=android "$BUILD_DIR"
             cp -f "$SRC_DIR/pubspec.yaml" "$BUILD_DIR/pubspec.yaml"
             for f in main.dart adaptive_study_workspace.dart study_models.dart study_services.dart study_sync_repository.dart study_workspace_widgets.dart real_device_audio_adapter.dart; do
-              if [ -f "$SRC_DIR/$f" ]; then
-                cp -f "$SRC_DIR/$f" "$BUILD_DIR/lib/$f"
-              fi
+              [ -f "$SRC_DIR/$f" ] && cp -f "$SRC_DIR/$f" "$BUILD_DIR/lib/$f"
             done
             if [ -f "$SRC_DIR/MainActivity.kt" ]; then
               mkdir -p "$BUILD_DIR/android/app/src/main/kotlin/com/studynote/study_note_app"
@@ -55,6 +48,84 @@ jobs:
             fi
             cd "$BUILD_DIR"
           fi
+
+          python3 - << 'PYEOF'
+          import glob, os
+
+          def repair_dart(code):
+              out = []
+              i, n, fixes = 0, len(code), 0
+              while i < n:
+                  ch = code[i]
+                  if code[i:i+2] == '//':
+                      end = code.find('\n', i)
+                      if end == -1:
+                          out.append(code[i:]); break
+                      out.append(code[i:end+1]); i = end + 1; continue
+                  if code[i:i+2] == '/*':
+                      end = code.find('*/', i + 2)
+                      if end == -1:
+                          out.append(code[i:]); break
+                      out.append(code[i:end+2]); i = end + 2; continue
+                  if ch == 'r' and i + 1 < n and code[i+1] in ("'", '"'):
+                      q = code[i+1]
+                      if code[i+1:i+4] == q * 3:
+                          end = code.find(q * 3, i + 4)
+                          if end == -1:
+                              out.append(code[i:]); break
+                          out.append(code[i:end+3]); i = end + 3; continue
+                      out.append('r' + q); i += 2
+                      while i < n and code[i] != q:
+                          if code[i] == '\r' and i + 1 < n and code[i+1] == '\n':
+                              out.append('\\n'); fixes += 1; i += 2
+                          elif code[i] == '\n':
+                              out.append('\\n'); fixes += 1; i += 1
+                          else:
+                              out.append(code[i]); i += 1
+                      if i < n:
+                          out.append(code[i]); i += 1
+                      continue
+                  if code[i:i+3] in ("'''", '"""'):
+                      q3 = code[i:i+3]; out.append(q3); i += 3
+                      while i < n and code[i:i+3] != q3:
+                          if code[i] == '\\' and i + 1 < n:
+                              out.append(code[i:i+2]); i += 2
+                          else:
+                              out.append(code[i]); i += 1
+                      if i < n:
+                          out.append(q3); i += 3
+                      continue
+                  if ch in ("'", '"'):
+                      q = ch; out.append(q); i += 1; interp = 0
+                      while i < n:
+                          if code[i] == '\\' and i + 1 < n:
+                              out.append(code[i:i+2]); i += 2; continue
+                          if code[i:i+2] == '${':
+                              interp += 1; out.append('${'); i += 2; continue
+                          if interp > 0:
+                              if code[i] == '{': interp += 1
+                              elif code[i] == '}': interp -= 1
+                              out.append(code[i]); i += 1; continue
+                          if code[i] == q:
+                              out.append(q); i += 1; break
+                          if code[i] == '\r' and i + 1 < n and code[i+1] == '\n':
+                              out.append('\\n'); fixes += 1; i += 2; continue
+                          if code[i] == '\n':
+                              out.append('\\n'); fixes += 1; i += 1; continue
+                          out.append(code[i]); i += 1
+                      continue
+                  out.append(ch); i += 1
+              return ''.join(out), fixes
+
+          for path in glob.glob('lib/**/*.dart', recursive=True):
+              with open(path, 'r', encoding='utf-8') as f:
+                  src = f.read()
+              fixed, cnt = repair_dart(src)
+              if cnt > 0:
+                  with open(path, 'w', encoding='utf-8') as f:
+                      f.write(fixed)
+                  print(f"🔧 자동 복구 완료: {path} (깨진 줄바꿈 문자열 {cnt}곳 수정)")
+          PYEOF
 
           flutter pub get
           flutter build apk --release
@@ -74,38 +145,109 @@ jobs:
       - uses: subosito/flutter-action@v2
         with:
           channel: 'stable'
-      - name: Auto-Detect Project & Build Windows EXE
+      - name: Auto-Detect Project, Repair Strings & Build Windows EXE
         shell: bash
         run: |
           set -e
           PUBSPEC_PATH="$(find . -maxdepth 4 -name 'pubspec.yaml' -not -path '*/.*' | head -n 1)"
           if [ -z "$PUBSPEC_PATH" ]; then
             echo "ERROR: pubspec.yaml 파일을 저장소에서 찾을 수 없습니다."
-            ls -la
             exit 1
           fi
           SRC_DIR="$(dirname "$PUBSPEC_PATH")"
-          echo "✅ pubspec.yaml 발견: $PUBSPEC_PATH (기준 폴더: $SRC_DIR)"
+          echo "✅ pubspec.yaml 발견: $PUBSPEC_PATH"
 
           if [ -f "$SRC_DIR/lib/main.dart" ]; then
-            echo "✅ 이미 조립된 Flutter 프로젝트($SRC_DIR)를 그대로 사용합니다."
             cd "$SRC_DIR"
-            if [ ! -d "windows" ]; then
-              flutter create --org com.studynote --platforms=windows .
-            fi
+            [ ! -d "windows" ] && flutter create --org com.studynote --platforms=windows .
           else
-            echo "🛠️ 낱개 소스 파일 폴더($SRC_DIR)에서 임시 앱 폴더를 조립합니다."
             BUILD_DIR="$GITHUB_WORKSPACE/__build_windows_app"
             rm -rf "$BUILD_DIR"
             flutter create --org com.studynote --platforms=windows "$BUILD_DIR"
             cp -f "$SRC_DIR/pubspec.yaml" "$BUILD_DIR/pubspec.yaml"
             for f in main.dart adaptive_study_workspace.dart study_models.dart study_services.dart study_sync_repository.dart study_workspace_widgets.dart real_device_audio_adapter.dart; do
-              if [ -f "$SRC_DIR/$f" ]; then
-                cp -f "$SRC_DIR/$f" "$BUILD_DIR/lib/$f"
-              fi
+              [ -f "$SRC_DIR/$f" ] && cp -f "$SRC_DIR/$f" "$BUILD_DIR/lib/$f"
             done
             cd "$BUILD_DIR"
           fi
+
+          python3 - << 'PYEOF'
+          import glob, os
+
+          def repair_dart(code):
+              out = []
+              i, n, fixes = 0, len(code), 0
+              while i < n:
+                  ch = code[i]
+                  if code[i:i+2] == '//':
+                      end = code.find('\n', i)
+                      if end == -1:
+                          out.append(code[i:]); break
+                      out.append(code[i:end+1]); i = end + 1; continue
+                  if code[i:i+2] == '/*':
+                      end = code.find('*/', i + 2)
+                      if end == -1:
+                          out.append(code[i:]); break
+                      out.append(code[i:end+2]); i = end + 2; continue
+                  if ch == 'r' and i + 1 < n and code[i+1] in ("'", '"'):
+                      q = code[i+1]
+                      if code[i+1:i+4] == q * 3:
+                          end = code.find(q * 3, i + 4)
+                          if end == -1:
+                              out.append(code[i:]); break
+                          out.append(code[i:end+3]); i = end + 3; continue
+                      out.append('r' + q); i += 2
+                      while i < n and code[i] != q:
+                          if code[i] == '\r' and i + 1 < n and code[i+1] == '\n':
+                              out.append('\\n'); fixes += 1; i += 2
+                          elif code[i] == '\n':
+                              out.append('\\n'); fixes += 1; i += 1
+                          else:
+                              out.append(code[i]); i += 1
+                      if i < n:
+                          out.append(code[i]); i += 1
+                      continue
+                  if code[i:i+3] in ("'''", '"""'):
+                      q3 = code[i:i+3]; out.append(q3); i += 3
+                      while i < n and code[i:i+3] != q3:
+                          if code[i] == '\\' and i + 1 < n:
+                              out.append(code[i:i+2]); i += 2
+                          else:
+                              out.append(code[i]); i += 1
+                      if i < n:
+                          out.append(q3); i += 3
+                      continue
+                  if ch in ("'", '"'):
+                      q = ch; out.append(q); i += 1; interp = 0
+                      while i < n:
+                          if code[i] == '\\' and i + 1 < n:
+                              out.append(code[i:i+2]); i += 2; continue
+                          if code[i:i+2] == '${':
+                              interp += 1; out.append('${'); i += 2; continue
+                          if interp > 0:
+                              if code[i] == '{': interp += 1
+                              elif code[i] == '}': interp -= 1
+                              out.append(code[i]); i += 1; continue
+                          if code[i] == q:
+                              out.append(q); i += 1; break
+                          if code[i] == '\r' and i + 1 < n and code[i+1] == '\n':
+                              out.append('\\n'); fixes += 1; i += 2; continue
+                          if code[i] == '\n':
+                              out.append('\\n'); fixes += 1; i += 1; continue
+                          out.append(code[i]); i += 1
+                      continue
+                  out.append(ch); i += 1
+              return ''.join(out), fixes
+
+          for path in glob.glob('lib/**/*.dart', recursive=True):
+              with open(path, 'r', encoding='utf-8') as f:
+                  src = f.read()
+              fixed, cnt = repair_dart(src)
+              if cnt > 0:
+                  with open(path, 'w', encoding='utf-8') as f:
+                      f.write(fixed)
+                  print(f"🔧 자동 복구 완료: {path} (깨진 줄바꿈 문자열 {cnt}곳 수정)")
+          PYEOF
 
           flutter pub get
           flutter build windows --release
@@ -126,41 +268,112 @@ jobs:
       - uses: subosito/flutter-action@v2
         with:
           channel: 'stable'
-      - name: Auto-Detect Project & Build Unsigned iPad IPA
+      - name: Auto-Detect Project, Repair Strings & Build Unsigned iPad IPA
         shell: bash
         run: |
           set -e
           PUBSPEC_PATH="$(find . -maxdepth 4 -name 'pubspec.yaml' -not -path '*/.*' | head -n 1)"
           if [ -z "$PUBSPEC_PATH" ]; then
             echo "ERROR: pubspec.yaml 파일을 저장소에서 찾을 수 없습니다."
-            ls -la
             exit 1
           fi
           SRC_DIR="$(dirname "$PUBSPEC_PATH")"
-          echo "✅ pubspec.yaml 발견: $PUBSPEC_PATH (기준 폴더: $SRC_DIR)"
+          echo "✅ pubspec.yaml 발견: $PUBSPEC_PATH"
 
           if [ -f "$SRC_DIR/lib/main.dart" ]; then
-            echo "✅ 이미 조립된 Flutter 프로젝트($SRC_DIR)를 그대로 사용합니다."
             cd "$SRC_DIR"
-            if [ ! -d "ios" ]; then
-              flutter create --org com.studynote --platforms=ios .
-            fi
+            [ ! -d "ios" ] && flutter create --org com.studynote --platforms=ios .
           else
-            echo "🛠️ 낱개 소스 파일 폴더($SRC_DIR)에서 임시 앱 폴더를 조립합니다."
             BUILD_DIR="$GITHUB_WORKSPACE/__build_ios_app"
             rm -rf "$BUILD_DIR"
             flutter create --org com.studynote --platforms=ios "$BUILD_DIR"
             cp -f "$SRC_DIR/pubspec.yaml" "$BUILD_DIR/pubspec.yaml"
             for f in main.dart adaptive_study_workspace.dart study_models.dart study_services.dart study_sync_repository.dart study_workspace_widgets.dart real_device_audio_adapter.dart; do
-              if [ -f "$SRC_DIR/$f" ]; then
-                cp -f "$SRC_DIR/$f" "$BUILD_DIR/lib/$f"
-              fi
+              [ -f "$SRC_DIR/$f" ] && cp -f "$SRC_DIR/$f" "$BUILD_DIR/lib/$f"
             done
             if [ -f "$SRC_DIR/AppDelegate.swift" ]; then
               cp -f "$SRC_DIR/AppDelegate.swift" "$BUILD_DIR/ios/Runner/AppDelegate.swift"
             fi
             cd "$BUILD_DIR"
           fi
+
+          python3 - << 'PYEOF'
+          import glob, os
+
+          def repair_dart(code):
+              out = []
+              i, n, fixes = 0, len(code), 0
+              while i < n:
+                  ch = code[i]
+                  if code[i:i+2] == '//':
+                      end = code.find('\n', i)
+                      if end == -1:
+                          out.append(code[i:]); break
+                      out.append(code[i:end+1]); i = end + 1; continue
+                  if code[i:i+2] == '/*':
+                      end = code.find('*/', i + 2)
+                      if end == -1:
+                          out.append(code[i:]); break
+                      out.append(code[i:end+2]); i = end + 2; continue
+                  if ch == 'r' and i + 1 < n and code[i+1] in ("'", '"'):
+                      q = code[i+1]
+                      if code[i+1:i+4] == q * 3:
+                          end = code.find(q * 3, i + 4)
+                          if end == -1:
+                              out.append(code[i:]); break
+                          out.append(code[i:end+3]); i = end + 3; continue
+                      out.append('r' + q); i += 2
+                      while i < n and code[i] != q:
+                          if code[i] == '\r' and i + 1 < n and code[i+1] == '\n':
+                              out.append('\\n'); fixes += 1; i += 2
+                          elif code[i] == '\n':
+                              out.append('\\n'); fixes += 1; i += 1
+                          else:
+                              out.append(code[i]); i += 1
+                      if i < n:
+                          out.append(code[i]); i += 1
+                      continue
+                  if code[i:i+3] in ("'''", '"""'):
+                      q3 = code[i:i+3]; out.append(q3); i += 3
+                      while i < n and code[i:i+3] != q3:
+                          if code[i] == '\\' and i + 1 < n:
+                              out.append(code[i:i+2]); i += 2
+                          else:
+                              out.append(code[i]); i += 1
+                      if i < n:
+                          out.append(q3); i += 3
+                      continue
+                  if ch in ("'", '"'):
+                      q = ch; out.append(q); i += 1; interp = 0
+                      while i < n:
+                          if code[i] == '\\' and i + 1 < n:
+                              out.append(code[i:i+2]); i += 2; continue
+                          if code[i:i+2] == '${':
+                              interp += 1; out.append('${'); i += 2; continue
+                          if interp > 0:
+                              if code[i] == '{': interp += 1
+                              elif code[i] == '}': interp -= 1
+                              out.append(code[i]); i += 1; continue
+                          if code[i] == q:
+                              out.append(q); i += 1; break
+                          if code[i] == '\r' and i + 1 < n and code[i+1] == '\n':
+                              out.append('\\n'); fixes += 1; i += 2; continue
+                          if code[i] == '\n':
+                              out.append('\\n'); fixes += 1; i += 1; continue
+                          out.append(code[i]); i += 1
+                      continue
+                  out.append(ch); i += 1
+              return ''.join(out), fixes
+
+          for path in glob.glob('lib/**/*.dart', recursive=True):
+              with open(path, 'r', encoding='utf-8') as f:
+                  src = f.read()
+              fixed, cnt = repair_dart(src)
+              if cnt > 0:
+                  with open(path, 'w', encoding='utf-8') as f:
+                      f.write(fixed)
+                  print(f"🔧 자동 복구 완료: {path} (깨진 줄바꿈 문자열 {cnt}곳 수정)")
+          PYEOF
 
           /usr/libexec/PlistBuddy -c "Add :NSMicrophoneUsageDescription string '강의 음성을 녹음하고 필기 타임스탬프와 동기화하기 위해 마이크 권한이 필요합니다.'" ios/Runner/Info.plist 2>/dev/null || true
           /usr/libexec/PlistBuddy -c "Add :NSCalendarsFullAccessUsageDescription string 'AI 스터디 플래너 일정을 캘린더에 등록하기 위해 권한이 필요합니다.'" ios/Runner/Info.plist 2>/dev/null || true
@@ -175,11 +388,28 @@ jobs:
             (cd ios && pod install) || true
           fi
 
-          # Xcode가 모든 하위 SwiftPM/CocoaPods 번들에서도 Development Team을 요구하지 않도록 강제 무서명 빌드
           if [ -d "ios/Runner.xcworkspace" ]; then
-            xcodebuild build               -workspace ios/Runner.xcworkspace               -scheme Runner               -configuration Release               -sdk iphoneos               -derivedDataPath build/ios_derived               CODE_SIGNING_ALLOWED=NO               CODE_SIGNING_REQUIRED=NO               CODE_SIGN_IDENTITY=""               DEVELOPMENT_TEAM=""
+            xcodebuild build \
+              -workspace ios/Runner.xcworkspace \
+              -scheme Runner \
+              -configuration Release \
+              -sdk iphoneos \
+              -derivedDataPath build/ios_derived \
+              CODE_SIGNING_ALLOWED=NO \
+              CODE_SIGNING_REQUIRED=NO \
+              CODE_SIGN_IDENTITY="" \
+              DEVELOPMENT_TEAM=""
           else
-            xcodebuild build               -project ios/Runner.xcodeproj               -scheme Runner               -configuration Release               -sdk iphoneos               -derivedDataPath build/ios_derived               CODE_SIGNING_ALLOWED=NO               CODE_SIGNING_REQUIRED=NO               CODE_SIGN_IDENTITY=""               DEVELOPMENT_TEAM=""
+            xcodebuild build \
+              -project ios/Runner.xcodeproj \
+              -scheme Runner \
+              -configuration Release \
+              -sdk iphoneos \
+              -derivedDataPath build/ios_derived \
+              CODE_SIGNING_ALLOWED=NO \
+              CODE_SIGNING_REQUIRED=NO \
+              CODE_SIGN_IDENTITY="" \
+              DEVELOPMENT_TEAM=""
           fi
 
           APP_PATH="$(find build/ios_derived -name 'Runner.app' -type d | head -n 1)"
@@ -197,3 +427,4 @@ jobs:
         with:
           name: StudyNote-iPad-IPA-설치파일(Sideloadly용)
           path: StudyNote_iPad_Sideloadly.ipa
+이번에 잡힌 원인 & 자동 해결 방식
