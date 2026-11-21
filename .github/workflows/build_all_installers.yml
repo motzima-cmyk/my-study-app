@@ -167,14 +167,30 @@ jobs:
           sed -i '' 's/IPHONEOS_DEPLOYMENT_TARGET = 1[1234]\.0;/IPHONEOS_DEPLOYMENT_TARGET = 15.0;/g' ios/Runner.xcodeproj/project.pbxproj 2>/dev/null || true
 
           flutter pub get
+          flutter build ios --release --no-codesign --config-only
+
           if [ -f "ios/Podfile" ]; then
             sed -i '' "s/# platform :ios, '[0-9.]*'/platform :ios, '15.0'/g" ios/Podfile || true
             sed -i '' "s/platform :ios, '1[1234]\.0'/platform :ios, '15.0'/g" ios/Podfile || true
+            (cd ios && pod install) || true
           fi
-          flutter build ios --release --no-codesign
+
+          # Xcode가 모든 하위 SwiftPM/CocoaPods 번들에서도 Development Team을 요구하지 않도록 강제 무서명 빌드
+          if [ -d "ios/Runner.xcworkspace" ]; then
+            xcodebuild build               -workspace ios/Runner.xcworkspace               -scheme Runner               -configuration Release               -sdk iphoneos               -derivedDataPath build/ios_derived               CODE_SIGNING_ALLOWED=NO               CODE_SIGNING_REQUIRED=NO               CODE_SIGN_IDENTITY=""               DEVELOPMENT_TEAM=""
+          else
+            xcodebuild build               -project ios/Runner.xcodeproj               -scheme Runner               -configuration Release               -sdk iphoneos               -derivedDataPath build/ios_derived               CODE_SIGNING_ALLOWED=NO               CODE_SIGNING_REQUIRED=NO               CODE_SIGN_IDENTITY=""               DEVELOPMENT_TEAM=""
+          fi
+
+          APP_PATH="$(find build/ios_derived -name 'Runner.app' -type d | head -n 1)"
+          if [ -z "$APP_PATH" ]; then
+            echo "ERROR: Runner.app 빌드 결과물을 찾지 못했습니다."
+            exit 1
+          fi
+          echo "✅ Runner.app 생성 완료: $APP_PATH"
           rm -rf Payload
           mkdir -p Payload
-          cp -r build/ios/iphoneos/Runner.app Payload/
+          cp -r "$APP_PATH" Payload/
           zip -r "$GITHUB_WORKSPACE/StudyNote_iPad_Sideloadly.ipa" Payload
       - name: Upload iPad IPA Artifact
         uses: actions/upload-artifact@v4
