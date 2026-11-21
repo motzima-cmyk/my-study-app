@@ -121,10 +121,14 @@ jobs:
               with open(path, 'r', encoding='utf-8') as f:
                   src = f.read()
               fixed, cnt = repair_dart(src)
-              if cnt > 0:
+              imp_fixed = fixed.replace(
+                  'package:syncfusion_flutter_pdfviewer/syncfusion_flutter_pdfviewer.dart',
+                  'package:syncfusion_flutter_pdfviewer/pdfviewer.dart',
+              )
+              if cnt > 0 or imp_fixed != fixed:
                   with open(path, 'w', encoding='utf-8') as f:
-                      f.write(fixed)
-                  print(f"🔧 자동 복구 완료: {path} (깨진 줄바꿈 문자열 {cnt}곳 수정)")
+                      f.write(imp_fixed)
+                  print(f"🔧 자동 복구 완료: {path} (줄바꿈 {cnt}곳, pdfviewer import 교정={imp_fixed != fixed})")
           PYEOF
 
           flutter pub get
@@ -243,10 +247,14 @@ jobs:
               with open(path, 'r', encoding='utf-8') as f:
                   src = f.read()
               fixed, cnt = repair_dart(src)
-              if cnt > 0:
+              imp_fixed = fixed.replace(
+                  'package:syncfusion_flutter_pdfviewer/syncfusion_flutter_pdfviewer.dart',
+                  'package:syncfusion_flutter_pdfviewer/pdfviewer.dart',
+              )
+              if cnt > 0 or imp_fixed != fixed:
                   with open(path, 'w', encoding='utf-8') as f:
-                      f.write(fixed)
-                  print(f"🔧 자동 복구 완료: {path} (깨진 줄바꿈 문자열 {cnt}곳 수정)")
+                      f.write(imp_fixed)
+                  print(f"🔧 자동 복구 완료: {path} (줄바꿈 {cnt}곳, pdfviewer import 교정={imp_fixed != fixed})")
           PYEOF
 
           flutter pub get
@@ -369,10 +377,14 @@ jobs:
               with open(path, 'r', encoding='utf-8') as f:
                   src = f.read()
               fixed, cnt = repair_dart(src)
-              if cnt > 0:
+              imp_fixed = fixed.replace(
+                  'package:syncfusion_flutter_pdfviewer/syncfusion_flutter_pdfviewer.dart',
+                  'package:syncfusion_flutter_pdfviewer/pdfviewer.dart',
+              )
+              if cnt > 0 or imp_fixed != fixed:
                   with open(path, 'w', encoding='utf-8') as f:
-                      f.write(fixed)
-                  print(f"🔧 자동 복구 완료: {path} (깨진 줄바꿈 문자열 {cnt}곳 수정)")
+                      f.write(imp_fixed)
+                  print(f"🔧 자동 복구 완료: {path} (줄바꿈 {cnt}곳, pdfviewer import 교정={imp_fixed != fixed})")
           PYEOF
 
           /usr/libexec/PlistBuddy -c "Add :NSMicrophoneUsageDescription string '강의 음성을 녹음하고 필기 타임스탬프와 동기화하기 위해 마이크 권한이 필요합니다.'" ios/Runner/Info.plist 2>/dev/null || true
