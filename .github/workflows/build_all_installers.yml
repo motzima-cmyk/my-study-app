@@ -427,4 +427,3 @@ jobs:
         with:
           name: StudyNote-iPad-IPA-설치파일(Sideloadly용)
           path: StudyNote_iPad_Sideloadly.ipa
-이번에 잡힌 원인 & 자동 해결 방식
