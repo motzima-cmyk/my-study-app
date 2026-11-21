@@ -1,0 +1,97 @@
+name: Build Android APK, Windows EXE & iPad IPA Installers
+
+on:
+  push:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+jobs:
+  # 1) 갤럭시 탭 / 안드로이드용 .apk 설치 파일 자동 생성
+  build-android-apk:
+    name: "📦 1. 갤럭시 탭용 APK 설치파일 생성"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: 'zulu'
+          java-version: '17'
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: 'stable'
+      - name: Assemble Flutter Project & Build Release APK
+        run: |
+          flutter create --org com.studynote study_note_app
+          cp -f pubspec.yaml study_note_app/pubspec.yaml
+          cp -f main.dart adaptive_study_workspace.dart study_models.dart study_services.dart study_sync_repository.dart study_workspace_widgets.dart real_device_audio_adapter.dart study_note_app/lib/
+          mkdir -p study_note_app/android/app/src/main/kotlin/com/studynote/study_note_app
+          cp -f MainActivity.kt study_note_app/android/app/src/main/kotlin/com/studynote/study_note_app/MainActivity.kt
+          cd study_note_app
+          flutter pub get
+          flutter build apk --release
+          cp build/app/outputs/flutter-apk/app-release.apk ../StudyNote_Android_Tablet.apk
+      - name: Upload Android APK Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: StudyNote-Android-APK-설치파일
+          path: StudyNote_Android_Tablet.apk
+
+  # 2) 윈도우 PC용 .exe 실행 파일 패키지 자동 생성
+  build-windows-exe:
+    name: "💻 2. 윈도우 PC용(.exe) 프로그램 생성"
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: 'stable'
+      - name: Assemble Flutter Project & Build Windows EXE
+        shell: cmd
+        run: |
+          flutter create --org com.studynote --platforms=windows study_note_app
+          copy /Y pubspec.yaml study_note_app\pubspec.yaml
+          copy /Y main.dart study_note_app\lib\main.dart
+          copy /Y adaptive_study_workspace.dart study_note_app\lib\adaptive_study_workspace.dart
+          copy /Y study_models.dart study_note_app\lib\study_models.dart
+          copy /Y study_services.dart study_note_app\lib\study_services.dart
+          copy /Y study_sync_repository.dart study_note_app\lib\study_sync_repository.dart
+          copy /Y study_workspace_widgets.dart study_note_app\lib\study_workspace_widgets.dart
+          copy /Y real_device_audio_adapter.dart study_note_app\lib\real_device_audio_adapter.dart
+          cd study_note_app
+          flutter pub get
+          flutter build windows --release
+      - name: Upload Windows EXE Folder Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: StudyNote-Windows-EXE-실행프로그램
+          path: study_note_app/build/windows/x64/runner/Release/
+
+  # 3) 아이패드용 .ipa 파일 자동 생성 (윈도우 Sideloadly 프로그램으로 아이패드에 바로 넣기용)
+  build-ipad-ipa:
+    name: "🍎 3. 아이패드용 IPA 설치파일 생성 (Sideloadly용)"
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: 'stable'
+      - name: Assemble Flutter Project & Build Unsigned iPad IPA
+        run: |
+          flutter create --org com.studynote --platforms=ios study_note_app
+          cp -f pubspec.yaml study_note_app/pubspec.yaml
+          cp -f main.dart adaptive_study_workspace.dart study_models.dart study_services.dart study_sync_repository.dart study_workspace_widgets.dart real_device_audio_adapter.dart study_note_app/lib/
+          cp -f AppDelegate.swift study_note_app/ios/Runner/AppDelegate.swift
+          /usr/libexec/PlistBuddy -c "Add :NSMicrophoneUsageDescription string '강의 음성을 녹음하고 필기 타임스탬프와 동기화하기 위해 마이크 권한이 필요합니다.'" study_note_app/ios/Runner/Info.plist || true
+          /usr/libexec/PlistBuddy -c "Add :NSCalendarsFullAccessUsageDescription string 'AI 스터디 플래너 일정을 캘린더에 등록하기 위해 권한이 필요합니다.'" study_note_app/ios/Runner/Info.plist || true
+          cd study_note_app
+          flutter pub get
+          sed -i '' "s/# platform :ios, '[0-9.]*'/platform :ios, '15.0'/g" ios/Podfile || true
+          flutter build ios --release --no-codesign
+          mkdir -p Payload
+          cp -r build/ios/iphoneos/Runner.app Payload/
+          zip -r ../StudyNote_iPad_Sideloadly.ipa Payload
+      - name: Upload iPad IPA Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: StudyNote-iPad-IPA-설치파일(Sideloadly용)
+          path: StudyNote_iPad_Sideloadly.ipa
